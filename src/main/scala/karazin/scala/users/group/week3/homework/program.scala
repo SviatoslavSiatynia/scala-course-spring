@@ -34,25 +34,22 @@ object program extends App:
     Replace `ErrorOr[List[PostView]] result type with `ErrorOrT[Future, List[PostView]]
     Provide the implementation for the service
    */
-  def getPostViews(post: Post)(commentsFilter: List[Comment] => Boolean,
-                              likesFilter: List[Like] => Boolean)
-                 (using ExecutionContext): ErrorOrT[Future, List[PostView]] =
+  def getPostsViews(apiKey: String)(commentsFilter: List[Comment] => Boolean,
+                                    likesFilter: List[Like] => Boolean)
+                   (using ExecutionContext): ErrorOrT[Future, List[PostView]] =
     println(s"Main thread: ${Thread.currentThread().getName}")
 
-    val getCommentsService = getComments(post.postId)(using fixedTreadPoolContext1)
-    val getLikesService = getLikes(post.postId)(using fixedTreadPoolContext1)
-    val getSharesService = getShares(post.postId)(using fixedTreadPoolContext1)
+    val getUserProfileService = getUserProfile(apiKey)(using fixedTreadPoolContext1)
 
     for
-      comments <- getCommentsService
-      if commentsFilter(comments)
-      likes <- getLikesService
-      if likesFilter(likes)
-      shares <- getSharesService
-    yield List(PostView(post, comments, likes, shares))
+      profile <- getUserProfileService
+      posts <- getPosts(profile.userId)
+      postsView <- posts.foldLeft(ErrorOrT(Future.successful(ErrorOr(List.empty[PostView])))) {
+        (views, post) => views flatMap (list => getPostView(post)(commentsFilter, likesFilter) map (list :+ _))
+      }
+    yield postsView
 
-
-  getPostViews(Post(UserId.generate, PostId.generate))(_ => true, _ => true).value.onComplete {
+  getPostsViews("apiKey")(_ => true, _ => true).value.onComplete {
     case Success(value)     => println(s"Completed with $value")
     case Failure(exception) => println(s"Failed with $exception")
   }
@@ -82,14 +79,3 @@ object program extends App:
       if likesFilter(likes)
       shares <- getSharesService
     yield PostView(post, comments, likes, shares)
-
-
-  getPostView(Post(UserId.generate, PostId.generate))(_ => true, _ => true).value.onComplete {
-    case Success(value)     => println(s"Completed with $value")
-    case Failure(exception) => println(s"Failed with $exception")
-  }
-
-  Thread.sleep(10000)
-
-  singleThreadPoolContext2.shutdown()
-  fixedTreadPoolContext2.shutdown()
